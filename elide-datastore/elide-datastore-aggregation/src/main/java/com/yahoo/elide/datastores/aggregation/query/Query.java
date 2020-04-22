@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 
 /**
  * A {@link Query} is an object representing a query executed by {@link QueryEngine}.
+ * {@link #equals(Object)} and {@link #hashCode()} results should not be affected by dimension ordering.
  */
 @Data
 @Builder

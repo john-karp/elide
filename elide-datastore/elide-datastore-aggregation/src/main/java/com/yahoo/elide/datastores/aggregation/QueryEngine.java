@@ -14,6 +14,7 @@ import com.yahoo.elide.datastores.aggregation.metadata.models.Dimension;
 import com.yahoo.elide.datastores.aggregation.metadata.models.Metric;
 import com.yahoo.elide.datastores.aggregation.metadata.models.Table;
 import com.yahoo.elide.datastores.aggregation.metadata.models.TimeDimension;
+import com.yahoo.elide.datastores.aggregation.query.Cache;
 import com.yahoo.elide.datastores.aggregation.query.ColumnProjection;
 import com.yahoo.elide.datastores.aggregation.query.MetricProjection;
 import com.yahoo.elide.datastores.aggregation.query.Query;
@@ -23,6 +24,7 @@ import com.yahoo.elide.request.Argument;
 import com.google.common.base.Functions;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -68,6 +70,7 @@ import java.util.stream.Collectors;
  * <p>
  * This is a {@link java.util.function functional interface} whose functional method is {@link #executeQuery(Query)}.
  */
+@Slf4j
 public abstract class QueryEngine {
     @Getter
     private final MetaDataStore metaDataStore;
@@ -77,18 +80,22 @@ public abstract class QueryEngine {
 
     private final Map<String, Table> tables;
 
+    private final Cache cache;
+
     /**
      * QueryEngine is constructed with a metadata store and is responsible for constructing all Tables and Entities
      * metadata in this metadata store.
      *
      * @param metaDataStore a metadata store
+     * @param cache the cache for query results, or null
      */
-    public QueryEngine(MetaDataStore metaDataStore) {
+    public QueryEngine(MetaDataStore metaDataStore, Cache cache) {
         this.metaDataStore = metaDataStore;
         this.metadataDictionary = metaDataStore.getDictionary();
         populateMetaData(metaDataStore);
         this.tables = metaDataStore.getMetaData(Table.class).stream()
                 .collect(Collectors.toMap(Table::getId, Functions.identity()));
+        this.cache = cache;
     }
 
     /**
@@ -161,6 +168,32 @@ public abstract class QueryEngine {
      * @return query results
      */
     public abstract Iterable<Object> executeQuery(Query query);
+
+    /**
+     * Executes the specified {@link Query} against a specific persistent storage, which understand the provided
+     * {@link Query}. Results may be taken from a cache, if configured.
+     *
+     * @param query    The query customized for a particular persistent storage or storage client
+     * @param useCache Whether to use the cache, if configured
+     * @return query results
+     */
+    public Iterable<Object> executeQuery(Query query, boolean useCache) {
+        if (cache == null || !useCache) {
+            return executeQuery(query);
+        }
+        Cache.Key key = new Cache.Key(query, getDataVersion(query));
+        return cache.get(key, this::executeQuery);
+    }
+
+    /**
+     * Get a value representing the version of the data sources referenced by the query.
+     * If any of the sources used by the query change in a way that might affect the results,
+     * the version should then differ. Versions need not increase, or have any additional semantics.
+     *
+     * @param query the query to determine the relevant data sources from
+     * @return the version
+     */
+    protected abstract int getDataVersion(Query query);
 
     /**
      * Returns the schema for a given entity class.
